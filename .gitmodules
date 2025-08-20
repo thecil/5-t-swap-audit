@@ -1,0 +1,4 @@
+[submodule "lib/forge-std"]
+	path = lib/forge-std
+[submodule "lib/openzeppelin-contracts"]
+	path = lib/openzeppelin-contracts
