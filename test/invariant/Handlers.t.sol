@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
-import {Test, console} from "forge-std/Test.sol";
-import {TSwapPool} from "../../src/TSwapPool.sol";
-import {ERC20Mock} from "../mocks/ERC20Mock.sol";
+
+import { Test, console } from "forge-std/Test.sol";
+import { TSwapPool } from "../../src/TSwapPool.sol";
+import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 
 contract Handler is Test {
     TSwapPool pool;
@@ -28,20 +29,12 @@ contract Handler is Test {
         poolToken = ERC20Mock(pool.getPoolToken());
     }
 
-    function swapPoolTokenForWethBasedOnOutputWeth(
-        uint256 outputWethAmount
-    ) public {
-        if (
-            weth.balanceOf(address(pool)) <= pool.getMinimumWethDepositAmount()
-        ) {
+    function swapPoolTokenForWethBasedOnOutputWeth(uint256 outputWethAmount) public {
+        if (weth.balanceOf(address(pool)) <= pool.getMinimumWethDepositAmount()) {
             return;
         }
 
-        outputWethAmount = bound(
-            outputWethAmount,
-            pool.getMinimumWethDepositAmount(),
-            weth.balanceOf(address(pool))
-        );
+        outputWethAmount = bound(outputWethAmount, pool.getMinimumWethDepositAmount(), weth.balanceOf(address(pool)));
         // If these two values are the same, we will divide by 0
         if (outputWethAmount == weth.balanceOf(address(pool))) {
             return;
@@ -55,17 +48,11 @@ contract Handler is Test {
             return;
         }
         // We * -1 since we are removing WETH from the system
-        _updateStartingDeltas(
-            int256(outputWethAmount) * -1,
-            int256(poolTokenAmount)
-        );
+        _updateStartingDeltas(int256(outputWethAmount) * -1, int256(poolTokenAmount));
 
         // Mint any necessary amount of pool tokens
         if (poolToken.balanceOf(user) < poolTokenAmount) {
-            poolToken.mint(
-                user,
-                poolTokenAmount - poolToken.balanceOf(user) + 1
-            );
+            poolToken.mint(user, poolTokenAmount - poolToken.balanceOf(user) + 1);
         }
 
         vm.startPrank(user);
@@ -85,17 +72,9 @@ contract Handler is Test {
 
     function deposit(uint256 wethAmountToDeposit) public {
         // make the amount to deposit a "reasonable" number. We wouldn't expect someone to have type(uint256).max WETH!!
-        wethAmountToDeposit = bound(
-            wethAmountToDeposit,
-            pool.getMinimumWethDepositAmount(),
-            type(uint64).max
-        );
-        uint256 amountPoolTokensToDepositBasedOnWeth = pool
-            .getPoolTokensToDepositBasedOnWeth(wethAmountToDeposit);
-        _updateStartingDeltas(
-            int256(wethAmountToDeposit),
-            int256(amountPoolTokensToDepositBasedOnWeth)
-        );
+        wethAmountToDeposit = bound(wethAmountToDeposit, pool.getMinimumWethDepositAmount(), type(uint64).max);
+        uint256 amountPoolTokensToDepositBasedOnWeth = pool.getPoolTokensToDepositBasedOnWeth(wethAmountToDeposit);
+        _updateStartingDeltas(int256(wethAmountToDeposit), int256(amountPoolTokensToDepositBasedOnWeth));
 
         vm.startPrank(liquidityProvider);
         weth.mint(liquidityProvider, wethAmountToDeposit);
@@ -117,10 +96,7 @@ contract Handler is Test {
     /*//////////////////////////////////////////////////////////////
                     HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
-    function _updateStartingDeltas(
-        int256 wethAmount,
-        int256 poolTokenAmount
-    ) internal {
+    function _updateStartingDeltas(int256 wethAmount, int256 poolTokenAmount) internal {
         startingY = int256(poolToken.balanceOf(address(pool)));
         startingX = int256(weth.balanceOf(address(pool)));
 
@@ -133,8 +109,7 @@ contract Handler is Test {
         uint256 endingWethBalance = weth.balanceOf(address(pool));
 
         // sell tokens == x == poolTokens
-        int256 actualDeltaPoolToken = int256(endingPoolTokenBalance) -
-            int256(startingY);
+        int256 actualDeltaPoolToken = int256(endingPoolTokenBalance) - int256(startingY);
         int256 deltaWeth = int256(endingWethBalance) - int256(startingX);
 
         actualDeltaX = deltaWeth;
