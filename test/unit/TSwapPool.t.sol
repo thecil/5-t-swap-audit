@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
-import {TSwapPool} from "../../src/PoolFactory.sol";
-import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
-import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { Test, console } from "forge-std/Test.sol";
+import { TSwapPool } from "../../src/PoolFactory.sol";
+import { ERC20Mock } from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract TSwapPoolTest is Test {
     TSwapPool pool;
@@ -17,12 +17,7 @@ contract TSwapPoolTest is Test {
     function setUp() public {
         poolToken = new ERC20Mock();
         weth = new ERC20Mock();
-        pool = new TSwapPool(
-            address(poolToken),
-            address(weth),
-            "LTokenA",
-            "LA"
-        );
+        pool = new TSwapPool(address(poolToken), address(weth), "LTokenA", "LA");
 
         weth.mint(liquidityProvider, 200e18);
         poolToken.mint(liquidityProvider, 200e18);
@@ -59,13 +54,7 @@ contract TSwapPoolTest is Test {
         // 110 * ~91 = 10,000
         uint256 expected = 9e18;
 
-        pool.swapExactInput(
-            poolToken,
-            10e18,
-            weth,
-            expected,
-            uint64(block.timestamp)
-        );
+        pool.swapExactInput(poolToken, 10e18, weth, expected, uint64(block.timestamp));
         assert(weth.balanceOf(user) >= expected);
     }
 
@@ -93,24 +82,14 @@ contract TSwapPoolTest is Test {
         vm.startPrank(user);
         uint256 expected = 9e18;
         poolToken.approve(address(pool), 10e18);
-        pool.swapExactInput(
-            poolToken,
-            10e18,
-            weth,
-            expected,
-            uint64(block.timestamp)
-        );
+        pool.swapExactInput(poolToken, 10e18, weth, expected, uint64(block.timestamp));
         vm.stopPrank();
 
         vm.startPrank(liquidityProvider);
         pool.approve(address(pool), 100e18);
         pool.withdraw(100e18, 90e18, 100e18, uint64(block.timestamp));
         assertEq(pool.totalSupply(), 0);
-        assert(
-            weth.balanceOf(liquidityProvider) +
-                poolToken.balanceOf(liquidityProvider) >
-                400e18
-        );
+        assert(weth.balanceOf(liquidityProvider) + poolToken.balanceOf(liquidityProvider) > 400e18);
     }
 
     function test_SwapExactAmountAlwaysReturnZero() public {
@@ -126,13 +105,7 @@ contract TSwapPoolTest is Test {
         uint256 expected = 9e18;
 
         // get the returned value by 'swapExactInput'
-        uint256 expectedOutput = pool.swapExactInput(
-            poolToken,
-            10e18,
-            weth,
-            expected,
-            uint64(block.timestamp)
-        );
+        uint256 expectedOutput = pool.swapExactInput(poolToken, 10e18, weth, expected, uint64(block.timestamp));
         // assert the returned value its zero, no matter what we swapped
         assertEq(expectedOutput, 0);
     }
