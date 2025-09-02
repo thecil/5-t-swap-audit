@@ -2,7 +2,119 @@
 
 ## HIGH
 
-### [H-1] `TSwapPool::deposit` function `deadline` parameter not being use to check the transaction deadline.
+### [H-1] - Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protocol to take too many tokens from user, resultin in lost fees.
+
+**Description**: The `getInputAmountBasedOnOutput` function is intended to calculate the amount of tokens a user should deposit given an amount of tokens of output tokens. However, the function currently miscalculates the resulting amount. When calculating the fee, it scales the amount by 10_000 instead of 1_000.
+
+**Impact**: Protocol takes more fees than expected from users.
+
+**Proof of Concept**: (Proof of Code)
+
+The following code is the actual codebase of the `TSwapPool::getInputAmountBasedOnOutput` function:
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function getInputAmountBasedOnOutput(
+        uint256 outputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(outputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 inputAmount)
+    {
+        return
+@>          ((inputReserves * outputAmount) * 10000) /
+            ((outputReserves - outputAmount) * 997);
+    }
+```
+
+</details>
+
+**Recommended Mitigation**: Change the `10000` magic number to `1000` to harmonize the calculation of the function:
+
+
+```diff
+    function getInputAmountBasedOnOutput(
+        uint256 outputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(outputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 inputAmount)
+    {
+        return
+-           ((inputReserves * outputAmount) * 10000) /
++           ((inputReserves * outputAmount) * 1000) /
+            ((outputReserves - outputAmount) * 997);
+    }
+```
+
+Also keep into consideration the `[I-9]` rule by replacing the magic number `1000` with a constant value that aligns with the expected precision for this calculations.
+
+### [H-2] - Lack of slippage protection in `TSwapPool::swapExactOutput` causes users to potentially receive way fewer tokens.
+
+**Description**: The `swapExactOutput` function does not include any sort of slippage protection. This function is similar to what is done in `TSwapPool::swapExactInput` where the function specifies a `minOutputAmount`, the `swapExactOutput` function should specify a `maxInputAmount`.
+
+**Impact**: If market conditions change before the transaction processes, the user could get a much worse swap.
+
+**Proof of Concept**: 
+
+1. The price of 1 WETH right now is 1,000 USDC.
+2. User inputs a `swapExactOutput` looking for 1 WETH.
+```
+inputToken = USDC
+outputToken = WETH
+outputAmount = 1
+deadline = whatever
+```
+3. The function does not offer a maxInput amount.
+4. As the transaction is pending in the mempool, the market changes, price move HUGE, 1 WETH is now 10,0000 USDC, 10x more than the user expected.
+5. The transaction completes, but the user sent the protocol 10,0000 USDC instead of the expected 1,000 USDC. 
+
+**Recommended Mitigation**: Refactor the `swapExactOutput` function to include a maximum input amount (`maxInputAmount`) parameter. This ensures that the user cannot submit a transaction for more than the expected output amount, thereby mitigating the risk of receiving a much worse swap.
+
+```diff
++   error TSwapPool__InputTooLow(uint256 inputedAmount, uint256 maxAmount);
+
+    function swapExactOutput(
+        IERC20 inputToken,
+        IERC20 outputToken,
+        uint256 outputAmount,
++       uint256 maxInputAmount
+        uint64 deadline
+    )
+        public
+        revertIfZero(outputAmount)
+        revertIfDeadlinePassed(deadline)
+        returns (uint256 inputAmount)
+    {
+        uint256 inputReserves = inputToken.balanceOf(address(this));
+        uint256 outputReserves = outputToken.balanceOf(address(this));
+
+        inputAmount = getInputAmountBasedOnOutput(
+            outputAmount,
+            inputReserves,
+            outputReserves
+        );
+
++       if (inputAmount < maxInputAmount) {
++           revert TSwapPool__InputTooLow(inputAmount, maxInputAmount);
++       }
+        _swap(inputToken, inputAmount, outputToken, outputAmount);
+    }
+```
+
+## MEDIUM
+
+### [M-1] - `TSwapPool::deposit` function `deadline` parameter is missing a check, causing trasactions to complete even after the deadline.
 
 **Description**:  The deposit function in the TSwapPool contract accepts a deadline parameter but does not utilize it to verify whether the transaction has been submitted before the deadline. This omission allows users to submit transactions after the intended time, potentially causing disruptions to the functionality of the system.
 
@@ -114,8 +226,148 @@ This is the actual code for the function:
         returns (uint256 liquidityTokensToMint)
 ```
 
-## MEDIUM
+
 ## LOW
+
+### [L-1] - `TSwapPool::_addLiquidityMintAndTransfer` private function emits the `LiquidityAdded` event with incorrect order of the events parameters. 
+
+**Description**: The `LiquidityAdded` event emmited by the `_addLiquidityMintAndTransfer` function has the parameters in a wrong order.
+
+**Impact**: Low
+
+**Proof of Concept**: (Proof of Code)
+
+The following code is the actual codebase of the `TSwapPool::_addLiquidityMintAndTransfer`.
+
+```solidity
+    function _addLiquidityMintAndTransfer(
+        uint256 wethToDeposit,
+        uint256 poolTokensToDeposit,
+        uint256 liquidityTokensToMint
+    ) private {
+        _mint(msg.sender, liquidityTokensToMint);
+        emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
+
+        // Interactions
+        i_wethToken.safeTransferFrom(msg.sender, address(this), wethToDeposit);
+        i_poolToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            poolTokensToDeposit
+        );
+    }
+```
+
+**Recommended Mitigation**: Modify the `TSwapPool::_addLiquidityMintAndTransfer` function to emit the event with the correct order of parameters.
+
+```diff
+
+    function _addLiquidityMintAndTransfer(
+        uint256 wethToDeposit,
+        uint256 poolTokensToDeposit,
+        uint256 liquidityTokensToMint
+    ) private {
+        _mint(msg.sender, liquidityTokensToMint);
+-       emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
++       emit LiquidityAdded(msg.sender, wethToDeposit, poolTokensToDeposit);
+
+        // Interactions
+        i_wethToken.safeTransferFrom(msg.sender, address(this), wethToDeposit);
+        i_poolToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            poolTokensToDeposit
+        );
+    }
+```
+
+### [L-2] - Default value returned by `TSwapPool::swapExactInput` function results in incorrect return value given. 
+
+**Description**: The `TSwapPool::swapExactInput` function is expected to return the actual amount of tokens bought by the caller. However, while it declares the named return value `output` it is never assigned a value, nor uses an explict return statement.
+
+**Impact**: The return value will always be 0, giving incorrect information to the caller.
+
+**Proof of Concept**: (Proof of Code)
+
+The following unit test demostrates this issue:
+
+```solidity
+    function test_SwapExactAmountAlwaysReturnZero() public {
+        // copy/paste of testDepositSwap because follows the same function pattern
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        poolToken.approve(address(pool), 10e18);
+        uint256 expected = 9e18;
+
+        // get the returned value by 'swapExactInput'
+        uint256 expectedOutputAmount = pool.swapExactInput(
+            poolToken,
+            10e18,
+            weth,
+            expected,
+            uint64(block.timestamp)
+        );
+        // assert the returned value its zero, no matter what we swapped
+        assertEq(expectedOutputAmount, 0);
+    }
+```
+
+**Recommended Mitigation**: 
+
+1. If the returned value is not needed, consider to remove the returned value and harmonize the rest of the function.
+
+2. If the returned value is needed, consider using a similar approach like the following example:
+
+```diff
+
+    function swapExactInput(
+        IERC20 inputToken,
+        uint256 inputAmount,
+        IERC20 outputToken,
+        uint256 minOutputAmount,
+        uint64 deadline
+    )
+        public
+        revertIfZero(inputAmount)
+        revertIfDeadlinePassed(deadline)
+        returns (
+            uint256 output
+        )
+    {
+        uint256 inputReserves = inputToken.balanceOf(address(this));
+        uint256 outputReserves = outputToken.balanceOf(address(this));
+
+-       uint256 outputAmount = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
++       output = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
+
+-       if (outputAmount < minOutputAmount) {
+-           revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
+-       }
++       if (output < minOutputAmount) {
++           revert TSwapPool__OutputTooLow(output, minOutputAmount);
++       }
+
+-       _swap(inputToken, inputAmount, outputToken, outputAmount);
++       _swap(inputToken, inputAmount, outputToken, output);        
+    }
+
+```
+
+### [L-3] - 
+
+**Description**:
+
+**Impact**:
+
+**Proof of Concept**: (Proof of Code)
+
+**Recommended Mitigation**: 
+
 ## INFORMATIONAL
 
 ### [I-1] - At `PoolFactory::PoolFactory__PoolDoesNotExist` error is not used and should be removed.
@@ -247,15 +499,270 @@ The following code is the actual codebase of the constructor for `TSwapPool`
 ```
 
 
-### [I-6] - 
+### [I-6] - `TSwapPool::MINIMUM_WETH_LIQUIDITY` is a constant, therefore not require to be emitted
 
-**Description**:
+**Description**: The `MINIMUM_WETH_LIQUIDITY` constant is used in the `deposit` function to check if the deposited WETH amount meets the minimum requirement. Since it is a constant value, it does not need to be emitted in the event logs.
 
-**Impact**:
+**Impact**: Low
 
 **Proof of Concept**: (Proof of Code)
 
-**Recommended Mitigation**: 
+This is the actual code for the function:
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function deposit(
+        uint256 wethToDeposit,
+        uint256 minimumLiquidityTokensToMint,
+        uint256 maximumPoolTokensToDeposit,
+        uint64 deadline
+    )
+        external
+        revertIfZero(wethToDeposit)
+        returns (uint256 liquidityTokensToMint)
+    {
+        if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
+            revert TSwapPool__WethDepositAmountTooLow(
+                MINIMUM_WETH_LIQUIDITY,
+                wethToDeposit
+            );
+        }
+```
+</details>
+
+**Recommended Mitigation**: Refactor the `TSwapPool__WethDepositAmountTooLow` error to match the following suggestion:
+
+```diff
+    error TSwapPool__WethDepositAmountTooLow(
+-       uint256 minimumWethDeposit,
+        uint256 wethToDeposit
+    );
+```
+
+Harmonize the rest of the code to match the new error signature.
+
+### [I-7] - `TSwapPool::deposit` unused `poolTokenReserves` variable.
+
+**Description**: `TSwapPool::deposit` declares an unused `poolTokenReserves` variable.
+
+**Impact**: Low
+
+**Proof of Concept**: (Proof of Code)
+
+This is the actual code for the function:
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function deposit(
+        uint256 wethToDeposit,
+        uint256 minimumLiquidityTokensToMint,
+        uint256 maximumPoolTokensToDeposit,
+        uint64 deadline
+    )
+        external
+        revertIfZero(wethToDeposit)
+        returns (uint256 liquidityTokensToMint)
+    {
+        if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
+            revert TSwapPool__WethDepositAmountTooLow(
+                MINIMUM_WETH_LIQUIDITY,
+                wethToDeposit
+            );
+        }
+        if (totalLiquidityTokenSupply() > 0) {
+            uint256 wethReserves = i_wethToken.balanceOf(address(this));
+@>          uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
+```
+</details>
+
+**Recommended Mitigation**: Remove the `poolTokenReserves` variable from the function, this will also help to save gas.
+
+### [I-8] - `TSwapPool::deposit` should follow CEI.
+
+**Description**: `TSwapPool::deposit` should follow the Checks-Effects-Interactions (CEI) pattern to prevent reentrancy attacks.
+
+**Impact**: Low
+
+**Proof of Concept**: (Proof of Code)
+
+This is the actual code for the function:
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function deposit(
+        uint256 wethToDeposit,
+        uint256 minimumLiquidityTokensToMint,
+        uint256 maximumPoolTokensToDeposit,
+        uint64 deadline
+    )
+        external
+        revertIfZero(wethToDeposit)
+        returns (uint256 liquidityTokensToMint)
+    {
+        if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
+            revert TSwapPool__WethDepositAmountTooLow(
+                MINIMUM_WETH_LIQUIDITY,
+                wethToDeposit
+            );
+        }
+        if (totalLiquidityTokenSupply() > 0) {
+            // rest of the logic...
+        } else {
+            // This will be the "initial" funding of the protocol. We are starting from blank here!
+            // We just have them send the tokens in, and we mint liquidity tokens based on the weth
+            _addLiquidityMintAndTransfer(
+                wethToDeposit,
+                maximumPoolTokensToDeposit,
+                wethToDeposit
+            );
+@>          liquidityTokensToMint = wethToDeposit;
+        }
+    }
+```
+</details>
+
+**Recommended Mitigation**: Move the `liquidityTokensToMint` assignment before the `_addLiquidityMintAndTransfer` call to follow the CEI pattern.
+
+```diff
+        } else {
++           liquidityTokensToMint = wethToDeposit;
+            // This will be the "initial" funding of the protocol. We are starting from blank here!
+            // We just have them send the tokens in, and we mint liquidity tokens based on the weth
+            _addLiquidityMintAndTransfer(
+                wethToDeposit,
+                maximumPoolTokensToDeposit,
+                wethToDeposit
+            );
+-           liquidityTokensToMint = wethToDeposit;
+        }
+```
+
+### [I-9] - Use constants instead of magic numbers
+
+**Description**: In programming, magic numbers refers to the use of unexplained numerical or string values directly in code, without any clear indication of their purpose or origin. The use of magic numbers can lead to confusion and make your code more difficult to understand, maintain, and update.
+
+To improve the readability and maintainability of your smart contracts, it is recommended to avoid using magic numbers and instead use named constants or variables to represent these values. By doing so, you provide clear context for the values, making it easier for developers to understand their purpose and significance.
+
+The functions `TSwapPool::getOutputAmountBasedOnInput` & `TSwapPool::getInputAmountBasedOnOutput` use magic numbers in their calculations, making the code less readable and maintainable.
+
+**Impact**: Low
+
+**Proof of Concept**: (Proof of Code)
+
+This is the actual codebase used on `TSwapPool::getOutputAmountBasedOnInput` & `TSwapPool::getInputAmountBasedOnOutput` functions.
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function getOutputAmountBasedOnInput(
+        uint256 inputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(inputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 outputAmount)
+    {
+@>      uint256 inputAmountMinusFee = inputAmount * 997;
+        uint256 numerator = inputAmountMinusFee * outputReserves;
+@>      uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
+        return numerator / denominator;
+    }
+
+    function getInputAmountBasedOnOutput(
+        uint256 outputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(outputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 inputAmount)
+    {
+        return
+@>          ((inputReserves * outputAmount) * 10000) /
+@>          ((outputReserves - outputAmount) * 997);
+    }
+```
+
+</details>
+
+**Recommended Mitigation**: To improve code maintainability, readability, and reduce the risk of potential errors, it is recommended to replace magic numbers with well-defined constants. By using constants, developers can provide clear and descriptive names for specific values, making the code easier to understand and maintain. Additionally, updating the values becomes more straightforward, as changes can be made in a single location, reducing the risk of errors and inconsistencies. For large numbers, consider using scientific notation (e.g., 1e4).
+
+Suggestions:
+
+```diff
++   uint256 constant PRECISION = 1000;
++   uint256 constant MIN_INPUT_FEE = 997;
+
+    function getOutputAmountBasedOnInput(
+        uint256 inputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(inputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 outputAmount)
+    {
+-       uint256 inputAmountMinusFee = inputAmount * 997;
++       uint256 inputAmountMinusFee = inputAmount * MIN_INPUT_FEE;
+        uint256 numerator = inputAmountMinusFee * outputReserves;
+-       uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
++       uint256 denominator = (inputReserves * PRECISION) + inputAmountMinusFee;
+        return numerator / denominator;
+    }
+
+    function getInputAmountBasedOnOutput(
+        uint256 outputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(outputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 inputAmount)
+    {
+        return
+-          ((inputReserves * outputAmount) * 10000) /
+-          ((outputReserves - outputAmount) * 997);
++          ((inputReserves * outputAmount) * PRECISION) /
++          ((outputReserves - outputAmount) * MIN_INPUT_FEE);
+    }
+
+```
+
+### [I-10] - `TSwapPool::swapExactInput` function is missing NatSpec Comments.
+
+**Description**: All the contracts in the code-base are missing or have incomplete code documentation, which affects the understandability, auditability, and usability of the code. Solidity contracts can use a special form of comments to provide rich documentation for functions, return variables, parameters, etc. This special form is named the Ethereum Natural Language Specification Format (NatSpec).
+
+**Impact**: Low.
+
+**Proof of Concept**: The actual code does not have any NatSpec comments, which makes it difficult for developers to understand the purpose and usage of the `swapExactInput` function.
+
+**Recommended Mitigation**: Consider adding in full NatSpec comments for all functions to have complete code documentation for future use.
+
+### [I-11] - `TSwapPool::swapExactInput` function can be made external.
+
+**Description**: The `TSwapPool::swapExactInput` function is defined as public. If a function is marked public but is not used internally, consider marking it as `external`.
+
+**Impact**:
+
+**Proof of Concept**: The actual implementation of the `TSwapPool::swapExactInput` function is marked as `public`.
+
+**Recommended Mitigation**: We recommend making the `TSwapPool::swapExactInput` function external.
 
 ## GAS
 

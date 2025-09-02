@@ -116,7 +116,7 @@ contract TSwapPool is ERC20 {
         uint256 wethToDeposit,
         uint256 minimumLiquidityTokensToMint,
         uint256 maximumPoolTokensToDeposit,
-        // @audit - [H-1] `TSwapPool::deposit` function `deadline` parameter not being use to check the transaction deadline.
+        // @audit - [M-1] - `TSwapPool::deposit` function `deadline` parameter is missing a check, causing trasactions to complete even after the deadline.
         uint64 deadline
     )
         external
@@ -124,7 +124,7 @@ contract TSwapPool is ERC20 {
         returns (uint256 liquidityTokensToMint)
     {
         if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
-            // @audit - info - MINIMUM_WETH_LIQUIDITY is a constant, therefore not require to be emitted
+            // @audit - [I-6] - `TSwapPool::MINIMUM_WETH_LIQUIDITY` is a constant, therefore not require to be emitted
             revert TSwapPool__WethDepositAmountTooLow(
                 MINIMUM_WETH_LIQUIDITY,
                 wethToDeposit
@@ -132,7 +132,7 @@ contract TSwapPool is ERC20 {
         }
         if (totalLiquidityTokenSupply() > 0) {
             uint256 wethReserves = i_wethToken.balanceOf(address(this));
-            // @audit - gas - don't need this line, remove it to save gas.
+            // @audit - [I-7] - `TSwapPool::deposit` unused `poolTokenReserves` variable.
             uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
             // Our invariant says weth, poolTokens, and liquidity tokens must always have the same ratio after the
             // initial deposit
@@ -186,8 +186,7 @@ contract TSwapPool is ERC20 {
                 maximumPoolTokensToDeposit,
                 wethToDeposit
             );
-            // @audit - info - it would be better if this was before the `_addLiquidityMintAndTransfer` call
-            // to follow CEI
+            // @audit - [I-8] - `TSwapPool::deposit` should follow CEI.
             liquidityTokensToMint = wethToDeposit;
         }
     }
@@ -202,10 +201,7 @@ contract TSwapPool is ERC20 {
         uint256 liquidityTokensToMint
     ) private {
         _mint(msg.sender, liquidityTokensToMint);
-        // @audit - low - this is backwards, should be
-        // 'LiquidityAdded(msg.sender, wethToDeposit, poolTokensToDeposit)'
-        // impact - super low - protocol is giving the wrong return/information
-        // likelihood - high
+        // @audit - [L-1] - `TSwapPool::_addLiquidityMintAndTransfer` private function emits the `LiquidityAdded` event with incorrect order of the events parameters.
         emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
 
         // Interactions
@@ -286,10 +282,10 @@ contract TSwapPool is ERC20 {
         // totalPoolTokensOfPool) + (wethToDeposit * poolTokensToDeposit) = k
         // (totalWethOfPool * totalPoolTokensOfPool) + (wethToDeposit * totalPoolTokensOfPool) = k - (totalWethOfPool *
         // poolTokensToDeposit) - (wethToDeposit * poolTokensToDeposit)
-        // @audit - info - magic number
+        // @audit - [I-9] - Use constants instead of magic numbers
         uint256 inputAmountMinusFee = inputAmount * 997;
         uint256 numerator = inputAmountMinusFee * outputReserves;
-        // @audit - info - magic number
+        // @audit - [I-9] - Use constants instead of magic numbers
         uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
         return numerator / denominator;
     }
@@ -305,15 +301,15 @@ contract TSwapPool is ERC20 {
         revertIfZero(outputReserves)
         returns (uint256 inputAmount)
     {
-        // @audit - high -
-        // impact: high - users are charged way too much!
-        // likelihood - high - always the case, swapExactOutput is one of the main swapping functions
+        // @audit - [H-1] - Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protocol to take too many tokens from user, resultin in lost fees.
         return
+            // @audit - [I-9] - Use constants instead of magic numbers
             ((inputReserves * outputAmount) * 10000) /
+            // @audit - [I-9] - Use constants instead of magic numbers
             ((outputReserves - outputAmount) * 997);
     }
 
-    // @audit - info - wheres the natspect?
+    // @audit - [I-10] - `TSwapPool::swapExactInput` function is missing NatSpec Comments.
     function swapExactInput(
         IERC20 inputToken,
         uint256 inputAmount,
@@ -322,13 +318,11 @@ contract TSwapPool is ERC20 {
         uint64 deadline
     )
         public
-        // @audit - info - this should be external
+        // @audit - [I-11] - `TSwapPool::swapExactInput` function can be made external.
         revertIfZero(inputAmount)
         revertIfDeadlinePassed(deadline)
         returns (
-            // @audit - low -
-            // impact - low - protocol is giving the gronw return.
-            // likelihood - high - always the case.
+            // @audit - [L-2] - Default value returned by `TSwapPool::swapExactInput` function results in incorrect return value given.
             uint256 output
         )
     {
@@ -363,7 +357,6 @@ contract TSwapPool is ERC20 {
         IERC20 inputToken,
         IERC20 outputToken,
         uint256 outputAmount,
-        // uint256 maxInputAmount
         uint64 deadline
     )
         public
@@ -380,10 +373,7 @@ contract TSwapPool is ERC20 {
             outputReserves
         );
 
-        // @audit - high - no slippage protection on `inputAmount`
-        // if (inputAmount < maxInputAmount) {
-            // revert TSwapPool__InputTooLow(inputAmount, maxInputAmount);
-        // }
+        // @audit - [H-2] - Lack of slippage protection in `TSwapPool::swapExactOutput` causes users to potentially receive way fewer tokens.
         _swap(inputToken, inputAmount, outputToken, outputAmount);
     }
 
