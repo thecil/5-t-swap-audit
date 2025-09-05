@@ -112,6 +112,111 @@ deadline = whatever
     }
 ```
 
+### [H-3] - `TSwapPool::sellPoolTokens` mismatches input and output tokens causing users to receive the incorrect amount of tokens.
+
+**Description**: The `sellPoolTokens` function is intended to allow users to easely sell pool tokens and receive WETH in exchange. Users indicate how many pool tokens they're willing to sell in the `poolTokenAmount` parameter. However, the function currently miscalculates the swapped amount.
+
+This is due the fact that the `swapExactOutput` function is called, whereas the `swapExactInput` function is the one that should be called. Because users specify the exact amount of input tokens, not output.
+
+**Impact**: Users will swap the wrong amount of tokens, which is a severe disruption of protocol functionality.
+
+**Proof of Concept**: (Proof of Code)
+
+**Recommended Mitigation**: Consider changing the implementation to use `swapExactInput` instead of `swapExactOutput`. Note that this would alsow require changing the `sellPoolTokens` function to accept a new parameter (ie `minWethToReceive` to be passed to `swapExactInput`).
+
+```diff
+    function sellPoolTokens(
+        uint256 poolTokenAmount
++       uint256 minWethToReceive
+        ) external returns (uint256 wethAmount) {
+-        return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
++        return swapExactInput(i_poolToken, poolTokenAmount, i_wethToken, minWethToReceive, uint64(block.timestamp))
+    }
+```
+
+Additionally, it might be wise to add a deadline to the function, as there is currently no deadline.
+
+### [H-4] - In `TSwapPool::_swap` the extra tokens given to users after every `swapCount` breaks the protocol invarian of `x * y = k`.
+
+**Description**: The protocol follows a strict invariant of `x * y = k`. Where:
+- `x`: The balance of the pool token.
+- `y`: The balance of WETH.
+- `k`: the constant product of the two balances.
+
+This means, tat whenever the balances change in the protocol, the ratio between the two amounts should remain constant, hence the `k`. However, this is broken due to the extra incentive in the `_swap` function. Meaning that over time the protocol funds will be drained.
+
+**Impact**: A user could maliciously drain the protocol of funds by doing a lot of swaps and collecting the extra incentive given out by the protocol.
+
+Most simply put, the protocol's core invariant is broken.
+
+The follow block of code in the `TSwapPool::_swap` function, is responsible for the issue:
+
+```solidity
+    swap_count++;
+    if (swap_count >= SWAP_COUNT_MAX) {
+        swap_count = 0;
+        outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+    }
+```
+
+**Proof of Concept**: 
+1. A user swaps 10 times, and collects the extra incentive of `1_000_000_000_000_000_000` tokens.
+2. The user continues to swap until all the protocol funds are drained.
+
+<details>
+<summary>view code</summary>
+
+```solidity
+    function test_invariantBroken() public {
+        // provide liquidity to the pool
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
+        vm.stopPrank();
+
+        uint256 outputWeth = 1e17;
+
+        vm.startPrank(user);
+        poolToken.approve(address(pool), type(uint256).max);
+        poolToken.mint(user, 100e18);
+        // user will swap 9 times
+        for (uint256 i = 0; i < 9; i++) {
+            pool.swapExactOutput(
+                poolToken,
+                weth,
+                outputWeth,
+                uint64(block.timestamp)
+            );
+        }
+        int256 startingY = int256(weth.balanceOf(address(pool)));
+        int256 expectedDeltaY = int256(-1) * int256(outputWeth);
+        // user will swap the 10th time to break the protocol invariant
+        pool.swapExactOutput(
+            poolToken,
+            weth,
+            outputWeth,
+            uint64(block.timestamp)
+        );
+        vm.stopPrank();
+
+        uint256 endingY = weth.balanceOf(address(pool));
+        int256 actualDeltaY = int256(endingY) - int256(startingY);
+        assertEq(actualDeltaY, expectedDeltaY);
+    }
+```
+</details>
+
+**Recommended Mitigation**: Remove the extra incentive mechanism. If you want to keep this in, we should account for the change in the `x * y = k` protocol invariant. Or, we should set aside tokens in the same way we do with fees.
+
+```diff
+-   swap_count++;
+-   if (swap_count >= SWAP_COUNT_MAX) {
+-      swap_count = 0;
+-      outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+-   }
+```
+
 ## MEDIUM
 
 ### [M-1] - `TSwapPool::deposit` function `deadline` parameter is missing a check, causing trasactions to complete even after the deadline.
@@ -226,6 +331,15 @@ This is the actual code for the function:
         returns (uint256 liquidityTokensToMint)
 ```
 
+### [M-2] - Rebase, fee-on-transfer, and ERC777 tokens break procotol invariant 
+
+**Description**:
+
+**Impact**:
+
+**Proof of Concept**: (Proof of Code)
+
+**Recommended Mitigation**: 
 
 ## LOW
 
@@ -357,16 +471,6 @@ The following unit test demostrates this issue:
     }
 
 ```
-
-### [L-3] - 
-
-**Description**:
-
-**Impact**:
-
-**Proof of Concept**: (Proof of Code)
-
-**Recommended Mitigation**: 
 
 ## INFORMATIONAL
 
@@ -758,11 +862,21 @@ Suggestions:
 
 **Description**: The `TSwapPool::swapExactInput` function is defined as public. If a function is marked public but is not used internally, consider marking it as `external`.
 
-**Impact**:
+**Impact**: Low.
 
 **Proof of Concept**: The actual implementation of the `TSwapPool::swapExactInput` function is marked as `public`.
 
 **Recommended Mitigation**: We recommend making the `TSwapPool::swapExactInput` function external.
+
+### [I-12] - `TSwapPool::totalLiquidityTokenSupply` function can be made external.
+
+**Description**: The `TSwapPool::totalLiquidityTokenSupply` function is defined as public. If a function is marked public but is not used internally, consider marking it as `external`.
+
+**Impact**: Low.
+
+**Proof of Concept**: The actual implementation of the `TSwapPool::totalLiquidityTokenSupply` function is marked as `public`.
+
+**Recommended Mitigation**: We recommend making the `TSwapPool::totalLiquidityTokenSupply` function external.
 
 ## GAS
 

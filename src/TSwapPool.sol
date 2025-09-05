@@ -333,7 +333,8 @@ contract TSwapPool is ERC20 {
      * @return wethAmount amount of WETH received by caller
      */
     function sellPoolTokens(uint256 poolTokenAmount) external returns (uint256 wethAmount) {
-        // @audit - high - incorrect outputAmount
+        // @audit - [H-3] - `TSwapPool::sellPoolTokens` mismatches input and output tokens causing users to receive the
+        // incorrect amount of tokens.
         return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
     }
 
@@ -350,7 +351,8 @@ contract TSwapPool is ERC20 {
             revert TSwapPool__InvalidToken();
         }
 
-        // @audit - this breaks the protocol invariant
+        // @audit - [H-4] - In `TSwapPool::_swap` the extra tokens given to users after every `swapCount` breaks the
+        // protocol invarian of `x * y = k`.
         swap_count++;
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
@@ -379,7 +381,7 @@ contract TSwapPool is ERC20 {
     }
 
     /// @notice a more verbose way of getting the total supply of liquidity tokens
-    // @audit - info - this should be external
+    // @audit - [I-12] - `TSwapPool::totalLiquidityTokenSupply` function can be made external.
     function totalLiquidityTokenSupply() public view returns (uint256) {
         return totalSupply();
     }

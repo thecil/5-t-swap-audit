@@ -1,0 +1,33 @@
+'forge clean' running (wd: /workspaces/5-t-swap-audit)
+'forge config --json' running
+'forge build --build-info --skip */test/** */script/** --force' running (wd: /workspaces/5-t-swap-audit)
+INFO:Detectors:[93m
+TSwapPool.revertIfZero(uint256) (src/TSwapPool.sol#81-86) uses a dangerous strict equality:
+	- amount == 0 (src/TSwapPool.sol#82)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#dangerous-strict-equalities[0m
+INFO:Detectors:[92m
+PoolFactory.constructor(address).wethToken (src/PoolFactory.sol#41) lacks a zero-check on :
+		- i_wethToken = wethToken (src/PoolFactory.sol#42)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#missing-zero-address-validation[0m
+INFO:Detectors:[92m
+5 different versions of Solidity are used:
+	- Version constraint >=0.6.2 is used by:
+		->=0.6.2 (lib/forge-std/src/interfaces/IERC20.sol#2)
+		->=0.6.2 (lib/openzeppelin-contracts/contracts/interfaces/IERC1363.sol#4)
+		->=0.6.2 (lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol#4)
+	- Version constraint >=0.4.16 is used by:
+		->=0.4.16 (lib/openzeppelin-contracts/contracts/interfaces/IERC165.sol#4)
+		->=0.4.16 (lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol#4)
+		->=0.4.16 (lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol#4)
+		->=0.4.16 (lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol#4)
+	- Version constraint >=0.8.4 is used by:
+		->=0.8.4 (lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol#4)
+	- Version constraint ^0.8.20 is used by:
+		-^0.8.20 (lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol#4)
+		-^0.8.20 (lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol#4)
+		-^0.8.20 (lib/openzeppelin-contracts/contracts/utils/Context.sol#4)
+	- Version constraint 0.8.20 is used by:
+		-0.8.20 (src/PoolFactory.sol#15)
+		-0.8.20 (src/TSwapPool.sol#15)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#different-pragma-directives-are-used[0m
+INFO:Slither:. analyzed (13 contracts with 98 detectors), 3 result(s) found
